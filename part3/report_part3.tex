@@ -1,0 +1,177 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=0.85in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{microtype}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\graphicspath{{./part3/}}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!70!black,
+    citecolor=blue!70!black,
+    urlcolor=blue!70!black
+}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.96,0.96,0.96}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+\lstset{style=mystyle}
+
+\begin{document}
+
+\section{Part 3: Image Denoising and Wiener Filtering}
+
+This section evaluates techniques for noise variance estimation, spatial filtering (arithmetic mean and median), and frequency-domain Wiener filtering on a reference image degraded by additive white Gaussian noise. 
+
+\subsection{Image Acquisition and Synthetic Noise Injection}
+
+A reference image (\texttt{kodim04.png}) from the Kodak image suite is acquired and converted to grayscale. Synthetic Gaussian noise is injected such that the Peak Signal-to-Noise Ratio (PSNR) is exactly $20$ dB. The noisy image intensity values are deliberately unclipped, allowing them to exceed the standard $[0, 255]$ dynamic boundary to maintain linear noise statistics.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{part3_fig_a.png}
+    \caption{Left: The original uncorrupted Kodak reference image. Right: The image degraded with synthetic additive white Gaussian noise (PSNR exactly $20$ dB).}
+    \label{fig:noise_injection}
+\end{figure}
+
+The true noise variance required to achieve a $20$ dB PSNR is calculated analytically as $\sigma^2 = 255^2 / 100 \approx 650.25$. 
+
+\subsection{Blind Noise Variance Estimation}
+
+In the absence of a priori knowledge regarding the noise statistics, the noise variance is estimated directly from the degraded image. A computationally efficient and robust estimation method involves partitioning the image into small non-overlapping spatial blocks (e.g., $16 \times 16$) and calculating the sample variance within each block. 
+
+Under the assumption that the natural image contains at least one completely smooth, textureless region, the intrinsic structural variance of that optimal region approaches zero. Consequently, the minimum variance observed across all spatial blocks serves as an effective empirical estimate of the global noise variance. This procedure yields an estimated variance that closely matches the theoretical true variance ($\sigma^2 \approx 650.25$).
+
+\subsection{Spatial Filtering: Arithmetic Mean and Median Filters}
+
+The degraded image is subjected to spatial denoising using $m \times m$ arithmetic mean and median filters. To avoid external high-level image processing libraries, vectorized spatial window extraction is utilized via array stride manipulation. The PSNR is computed for filter sizes $m \in \{1, 3, 5, 7, 9\}$.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{part3_fig_b.png}
+    \caption{Denoising performance (PSNR) plotted as a function of the spatial filter window size $m$ for both arithmetic mean and median filters.}
+    \label{fig:spatial_psnr}
+\end{figure}
+
+\textbf{Analysis of PSNR Dynamics with Respect to Filter Size:}
+Spatial filters operate by aggregating local neighborhood information. Initially, increasing the spatial window size $m$ incorporates more neighborhood samples, effectively averaging out the zero-mean independent Gaussian noise. This substantially reduces the residual noise variance and yields a corresponding increase in the PSNR. 
+
+However, as $m$ continues to expand, the filters process increasingly heterogeneous spatial regions, resulting in the progressive blurring of high-frequency structural details (such as edges and textures). Eventually, the structural degradation penalty outweighs the noise reduction benefits, causing the Mean Squared Error (MSE) to rise and the overall PSNR to decline.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{part3_fig_c.png}
+    \caption{The optimally restored images for both spatial filtering techniques. Left: Best Mean Filter result. Right: Best Median Filter result.}
+    \label{fig:best_spatial}
+\end{figure}
+
+\subsection{Frequency-Domain Wiener Filtering}
+
+The Wiener filter minimizes the mean square error between the estimated image and the true image. In the frequency domain, the Wiener filter transfer function without blur is formulated as:
+
+\begin{equation}
+W(u,v) = \frac{S_f(u,v)}{S_f(u,v) + S_\eta(u,v)} = \frac{1}{1 + \frac{S_\eta(u,v)}{S_f(u,v)}}
+\end{equation}
+
+where $S_f$ and $S_\eta$ represent the power spectral densities of the image and the noise, respectively.
+
+\subsubsection{Constant Power Spectral Density Ratio Assumption}
+When the ratio $S_\eta / S_f$ is strictly assumed to be a global constant $K$, the transfer function simplifies to $W(u,v) = \frac{1}{1 + K}$. Under this assumption, the filter operates purely as a uniform scalar multiplier across all frequencies, scaling down both signal and noise proportionally. A parameter sweep identifies the empirical optimum constant $K$ that maximizes the PSNR.
+
+\subsubsection{Frequency-Dependent Adaptive Estimate}
+A robust frequency-dependent estimate leverages the expected noise power spectrum. For Gaussian white noise, $\mathbb{E}(|N[u,v]|^2) \approx M N \sigma^2$, where $M, N$ correspond to the spatial dimensions of the padded image. The uncorrupted image power spectrum is approximated via spectral subtraction: 
+
+\begin{equation}
+\mathbb{E}(|F[u,v]|^2) \approx \max(|G[u,v]|^2 - \mathbb{E}(|N[u,v]|^2), 0)
+\end{equation}
+
+Substituting this into the formulation yields a frequency-adaptive filter that attenuates individual frequency bins selectively based on their localized signal-to-noise ratio.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{part3_fig_d.png}
+    \caption{Left: The result of the Constant Ratio Wiener Filter, optimized via grid search over $K$. Right: The result of the Frequency-Dependent Adaptive Wiener Filter. The adaptive filter preserves high-frequency structural details significantly better than the constant scalar approach.}
+    \label{fig:wiener_comparison}
+\end{figure}
+
+\subsection{Algorithm Pseudocode}
+\begin{lstlisting}[
+    language=Python,
+    caption={Pseudo-code for Noise Estimation and Wiener Filtering},
+    label={lst:part3}
+]
+INPUT: Clean reference image I
+Calculate sigma for target 20dB PSNR
+Noise = Generate_Gaussian_Noise(sigma)
+I_degraded = I + Noise
+
+/* 3A: Blind Noise Estimation */
+Min_Variance = Infinity
+FOR each non-overlapping 16x16 block IN I_degraded:
+    IF Var(block) < Min_Variance:
+        Min_Variance = Var(block)
+Estimated_Variance = Min_Variance
+
+/* 3B: Spatial Filtering */
+FOR m IN [1, 3, 5, 7, 9]:
+    I_mean = Custom_MeanFilter(I_degraded, m)
+    I_median = Custom_MedianFilter(I_degraded, m)
+    Record PSNR for both filters
+Plot PSNR vs m and select best m
+
+/* 3C: Wiener Filtering (Constant Ratio) */
+Pad I_degraded to power of two dimensions
+G = Custom_FFT2D(I_degraded_padded)
+
+Best_PSNR = 0
+FOR K in logarithmic_space:
+    W_constant = 1 / (1 + K)
+    F_hat = G * W_constant
+    I_restored = Custom_IFFT2D(F_hat)
+    IF PSNR(I_restored) > Best_PSNR: Best_K = K
+
+/* 3D: Wiener Filtering (Adaptive Frequency-Dependent) */
+M, N = Dimensions(G)
+Expected_Noise_Power = M * N * Estimated_Variance
+Power_Spectrum_G = abs(G)^2
+
+Estimated_F_Power = MAX(Power_Spectrum_G - Expected_Noise_Power, 0)
+W_adaptive = Estimated_F_Power / (Estimated_F_Power + Expected_Noise_Power)
+
+F_hat_adaptive = G * W_adaptive
+I_adaptive_restored = Custom_IFFT2D(F_hat_adaptive)
+
+Display comparative results
+\end{lstlisting}
+
+\end{document}

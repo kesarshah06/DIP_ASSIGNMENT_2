@@ -1,0 +1,214 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=0.85in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{microtype}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\graphicspath{{./part2/}}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!70!black,
+    citecolor=blue!70!black,
+    urlcolor=blue!70!black
+}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.96,0.96,0.96}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+\lstset{style=mystyle}
+
+\begin{document}
+
+\section{Part 2: Frequency Domain Analysis and Periodic Noise Removal}
+
+This section explores frequency domain image processing techniques, focusing on the effects of sub-Nyquist sampling (aliasing), the design of anti-aliasing low-pass filters, and the removal of periodic interference patterns using notch filters. A custom implementation of the 2D Fast Fourier Transform (FFT) is utilized to compute the frequency spectra and apply the spatial filters in the frequency domain.
+
+\subsection{Fourier Spectrum Analysis}
+
+The initial objective is to analyze the frequency composition of an image containing a high-frequency repeating pattern. The input image is converted to grayscale, padded to the nearest power of two to satisfy the constraints of the radix-2 Cooley-Tukey algorithm, and transformed into the frequency domain.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{part2_fig_a.png}
+    \caption{Left: Original image padded to a power of two. Right: The Fourier magnitude spectrum displayed on a logarithmic scale. Distinct bright spikes (impulses) located away from the DC center component visually indicate the presence of strong periodic structural patterns.}
+    \label{fig:spectrum_original}
+\end{figure}
+
+The Fourier spectrum clearly reveals the periodicity of the underlying pattern. The primary energy is concentrated in distinct impulses corresponding to the dominant spatial frequencies of the repetitive texture.
+
+\subsection{Image Resampling and Aliasing}
+
+When an image is downscaled through basic spatial subsampling without prior filtering, high-frequency components that exceed the new Nyquist limit are folded back into the lower frequencies. This phenomenon is known as aliasing.
+
+To demonstrate this, the original image is spatially subsampled by a factor of $0.25$ using a nearest-neighbor approach. 
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{part2_fig_b.png}
+    \caption{Left: The original full-resolution image. Right: The resampled image demonstrating significant aliasing artifacts. The repeating pattern breaks down into visually distorted, lower-frequency moiré patterns.}
+    \label{fig:aliasing}
+\end{figure}
+
+The subsampling process evidently violates the Nyquist-Shannon sampling theorem, resulting in severe structural distortion where the high-frequency repeating pattern masquerades as an artificial, low-frequency wave pattern.
+
+\subsection{Anti-Aliasing via Low-Pass Filtering}
+
+Mathematically, subsampling an image by a factor of $M$ reduces the Nyquist frequency to $f_s / (2M)$. To prevent aliasing, signal frequencies exceeding this new Nyquist limit must be attenuated prior to subsampling. Consequently, the ideal low-pass filter (LPF) $H(u,v)$ in the frequency domain is defined as a 2D rectangular function:
+
+\begin{equation}
+H(u,v) = \begin{cases} 
+1 & \text{if } |u| \le u_{max} \text{ and } |v| \le v_{max} \\
+0 & \text{otherwise}
+\end{cases}
+\end{equation}
+
+where $u_{max}$ and $v_{max}$ represent the strict Nyquist limits for the vertical and horizontal spatial frequencies, respectively.
+
+To mitigate the ringing artifacts associated with the sharp cutoff of an ideal LPF, separable Butterworth low-pass filters are also evaluated. The transfer function of a separable Butterworth filter of order $n$ is defined as:
+
+\begin{equation}
+H_B(u,v) = \frac{1}{1 + (u/u_0)^{2n}} \times \frac{1}{1 + (v/v_0)^{2n}}
+\end{equation}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{part2_fig_c.png}
+    \caption{Comparison of anti-aliasing filters prior to downsampling. The ideal LPF eliminates aliasing completely but introduces ringing (Gibbs phenomenon). As the Butterworth order $n$ increases, the result converges toward the ideal LPF.}
+    \label{fig:lpf_comparison}
+\end{figure}
+
+\textbf{Analysis of Filter Quality and Artifacts:}
+The ideal low-pass filter eliminates aliasing entirely; however, the sharp cutoff in the frequency domain introduces severe ringing artifacts in the spatial domain. The Butterworth filter provides a continuous transition between the passband and stopband. Lower-order Butterworth filters (e.g., $n=2, 5$) exhibit minimal ringing but provide insufficient attenuation of aliasing frequencies. Conversely, higher-order filters (e.g., $n=20$) effectively suppress aliasing but introduce pronounced spatial ringing artifacts, approaching the behavior of the ideal filter.
+
+\subsection{Notch-Reject Filter Design}
+
+To preserve original spatial dimensions while suppressing specific periodic noise patterns, a notch-reject filter is designed. The filter targets the distinct impulsive peaks identified in the frequency domain in Section 2.1.
+
+The magnitude spectrum is computed, and the indices corresponding to the highest energy peaks (excluding the central DC component) are extracted. Conjugate symmetry is enforced to ensure the spatial output remains real-valued. A Butterworth notch-reject topology is employed to construct the transfer function:
+
+\begin{equation}
+H_{notch}(u,v) = \prod_{k=1}^{K} \left( \frac{1}{1 + (D_0 / D_k)^{2n}} \right) \left( \frac{1}{1 + (D_0 / D_{-k})^{2n}} \right)
+\end{equation}
+
+where $D_k$ and $D_{-k}$ represent the distance from the frequency coordinate $(u,v)$ to the identified symmetric notch centers $(u_k, v_k)$ and $(-u_k, -v_k)$, and $D_0$ is the notch radius.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{part2_fig_d.png}
+    \caption{Left: The synthesized notch transfer function $H(u,v)$. Middle: The filtered logarithmic spectrum. Right: The restored image with the periodic interference effectively suppressed.}
+    \label{fig:notch_filter}
+\end{figure}
+
+\subsection{Optimum Notch Filtering}
+
+Standard notch filtering forcibly zeroes out specific frequency bands, which can inadvertently remove legitimate structural image information residing at those frequencies. Optimum notch filtering assumes that the periodic noise is additive and seeks to subtract a spatially modulated variant of the noise estimate from the original image, thereby minimizing local degradation.
+
+The interference pattern is first isolated using a complementary Notch Pass Filter:
+\begin{equation}
+\eta(x,y) = \mathcal{F}^{-1}\{F(u,v) \cdot (1 - H_{notch}(u,v))\}
+\end{equation}
+
+A spatial neighborhood dimension (e.g., $5 \times 5$) is established to compute local variance and covariance estimators using a uniform box filter. A spatially adaptive weight function $w(x,y)$ is derived:
+
+\begin{equation}
+w(x,y) = \frac{\text{cov}(f(x,y), \eta(x,y))}{\text{var}(\eta(x,y)) + \epsilon}
+\end{equation}
+
+The modulated noise estimate is subsequently deducted from the original degraded image:
+
+\begin{equation}
+f_{restored}(x,y) = f_{degraded}(x,y) - w(x,y) \eta(x,y)
+\end{equation}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{part2_fig_e.png}
+    \caption{Top Left: The isolated noise estimate $\eta(x,y)$. Top Right: The spatially adaptive weight function $w(x,y)$. Bottom Left: The modulated noise array. Bottom Right: The optimally restored output image.}
+    \label{fig:optimum_notch}
+\end{figure}
+
+\textbf{Analysis of Local Neighborhood Size:}
+The selection of the local neighborhood dimension fundamentally dictates the accuracy of the local variance and covariance estimators. A neighborhood size that is excessively small causes the weight function $w(x,y)$ to become highly sensitive to microscopic intensity fluctuations, propagating spurious modulation artifacts into the restored image. Conversely, an excessively large neighborhood homogenizes the estimators, causing the weight function to lose spatial adaptability. In such cases, the algorithm fails to distinguish between the periodic interference pattern and legitimate high-contrast image structures. An optimal neighborhood size mitigates these extremes, facilitating a spatially adaptive subtraction that suppresses periodic noise without eroding intrinsic structural details.
+
+\subsection{Algorithm Pseudocode}
+\begin{lstlisting}[
+    language=Python,
+    caption={Pseudo-code for Frequency Domain Filtering and Optimal Notch Reconstruction},
+    label={lst:part2}
+]
+INPUT: Degraded grayscale image I
+Pad I to nearest power of two dimensions -> I_padded
+
+/* 2A: Forward Transform */
+F = Custom_FFT2D(I_padded)
+F_shifted = FFTShift(F)
+
+/* 2B: Basic Subsampling (Aliasing demonstration) */
+I_resampled = I[::4, ::4]
+
+/* 2C: Anti-Aliasing Low-Pass Filters */
+Generate Ideal_Rect_Filter matching downsample Nyquist bounds
+F_ideal = F_shifted * Ideal_Rect_Filter
+I_ideal_anti_aliased = Custom_IFFT2D(F_ideal)
+
+FOR order n IN [2, 5, 10, 20]:
+    Generate Butterworth_Filter of order n
+    F_bw = F_shifted * Butterworth_Filter
+    I_bw_anti_aliased = Custom_IFFT2D(F_bw)
+
+/* 2D: Standard Notch-Reject Filtering */
+Identify Top K frequency impulse coordinates (excluding DC)
+Construct H_notch Butterworth filter targeting identified coordinates
+
+F_notch = F_shifted * H_notch
+I_notch_restored = Custom_IFFT2D(F_notch)
+
+/* 2E: Optimal Notch Filtering */
+H_notch_pass = 1.0 - H_notch
+F_noise = F_shifted * H_notch_pass
+Noise_Estimate = Custom_IFFT2D(F_noise)
+
+Define BoxFilter(Window=5)
+Mean_Noise = BoxFilter(Noise_Estimate)
+Mean_Image = BoxFilter(I_padded)
+
+Var_Noise = BoxFilter(Noise_Estimate^2) - Mean_Noise^2
+Cov_Img_Noise = BoxFilter(I_padded * Noise_Estimate) - (Mean_Image * Mean_Noise)
+
+Weight_Map(w) = Cov_Img_Noise / (Var_Noise + epsilon)
+I_optimal_restored = I_padded - (w * Noise_Estimate)
+
+Crop padding and save outputs
+\end{lstlisting}
+
+\end{document}
