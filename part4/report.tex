@@ -1,0 +1,298 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[margin=0.85in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{microtype}
+
+\title{\textbf{\Large Part 4: Frequency-Domain Filtering and Image Restoration}}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+% =========================================================
+\section{Motion Blur Estimation and Transfer Function}
+% =========================================================
+
+\subsection{Estimating the Blur Vector}
+
+The image was captured while rotating the camera, producing predominantly horizontal motion blur. We model the motion as
+
+\[
+x_0(t)=at,\qquad y_0(t)=bt,\qquad t\in[0,1].
+\]
+
+By examining the length and direction of the visible streaks, we estimated the blur to be approximately 30 pixels horizontally, with negligible vertical motion. Thus,
+
+\[
+\boxed{(a,b)=(30,0)\text{ pixels}.}
+\]
+
+\subsection{Transfer Function}
+
+The blurred image is
+
+\[
+g(x,y)=\int_0^1 f(x-at,y-bt)\,dt.
+\]
+
+Taking the Fourier transform gives
+
+\[
+G(u,v)=H(u,v)F(u,v),
+\]
+
+where
+
+\[
+H(u,v)
+=
+\int_0^1 e^{-i2\pi(ua+vb)t}\,dt.
+\]
+
+Therefore,
+
+\[
+\boxed{
+H(u,v)
+=
+e^{-i\pi(ua+vb)}
+\operatorname{sinc}(ua+vb)
+}
+\]
+
+where
+
+\[
+\operatorname{sinc}(x)=\frac{\sin(\pi x)}{\pi x}.
+\]
+
+For $(a,b)=(30,0)$,
+
+\[
+\boxed{
+H(u,v)=e^{-i30\pi u}\operatorname{sinc}(30u)
+}
+\]
+
+and hence
+
+\[
+\boxed{|H(u,v)|=|\operatorname{sinc}(30u)|.}
+\]
+
+Since the blur is horizontal, the zeros of $H$ form approximately vertical bands in the frequency domain.
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.45\textwidth}
+        \includegraphics[width=\textwidth]{01_input.png}
+        \caption{Input blurred image}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.45\textwidth}
+        \includegraphics[width=\textwidth]{02_H_magnitude.png}
+        \caption{$|H(u,v)|$}
+    \end{subfigure}
+    \caption{Input image and magnitude of the motion-blur transfer function.}
+\end{figure}
+
+The Fourier spectrum shows the expected directional structure caused by the horizontal motion blur.
+
+% =========================================================
+\section{Inverse Filtering}
+% =========================================================
+
+Inverse filtering estimates the original spectrum as
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.35\linewidth]{03_inverse_filter.png}
+    \caption{Result of inverse filtering.}
+\end{figure}
+\[
+\boxed{
+\hat F(u,v)=\frac{G(u,v)}{H(u,v)}.
+}
+\]
+
+Since $H$ has zeros, direct division is unstable. In the implementation, values satisfying
+
+\[
+|H(u,v)|<10^{-3}
+\]
+
+were replaced by $10^{-3}$.
+
+
+
+The result contains severe streaking artifacts. This occurs because frequencies for which $|H|$ is small are strongly amplified by $1/H$, including noise and modelling errors. Since the problematic frequencies occur along specific bands rather than uniformly in the frequency plane, the resulting artifacts are directional rather than isotropic.
+
+% =========================================================
+\section{Wiener Deconvolution}
+% =========================================================
+
+To reduce the instability of inverse filtering, we used the Wiener filter
+
+\[
+\boxed{
+\hat F(u,v)
+=
+\frac{H^*(u,v)}
+{|H(u,v)|^2+K}G(u,v).
+}
+\]
+
+We tested a range of $K$ values. Small values produced strong streaking, while large values excessively smoothed the image. Based on visual comparison, we selected
+
+\[
+\boxed{K_{\mathrm{best}}=0.005}.
+\]
+
+The required comparison is therefore
+
+\[
+0.1K=0.0005,\qquad
+K=0.005,\qquad
+10K=0.05.
+\]
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.32\textwidth}
+        \includegraphics[width=\textwidth]{04_wiener_0.1K.png}
+        \caption{$K=0.0005$}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.32\textwidth}
+        \includegraphics[width=\textwidth]{05_wiener_best.png}
+        \caption{$K=0.005$}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.32\textwidth}
+        \includegraphics[width=\textwidth]{06_wiener_10K.png}
+        \caption{$K=0.05$}
+    \end{subfigure}
+    \caption{Wiener deconvolution for $0.1K$, $K$, and $10K$.}
+\end{figure}
+
+For $K=0.0005$, the restoration is extremely aggressive, but streaking noise completely dominates the image. At $K=0.005$, the image retains strong sharpness, but there are still distinct line artifacts present. These lines are ringing artifacts caused by the near-zero values of the transfer function $H(u,v)$ in the frequency domain. There is an inherent trade-off here: if we try to fully remove these lines by increasing the regularization further (e.g., to $K=0.05$), the artifacts successfully vanish, but the high-frequency details are also heavily suppressed, causing the overall image to become unacceptably blurry. Thus, $K=0.005$ gives the best qualitative compromise by maximizing the deblurring sharpness at the cost of retaining some of these artifact lines.
+
+% =========================================================
+\section{Regularized Deconvolution}
+% =========================================================
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.32\textwidth}
+        \includegraphics[width=\textwidth]{07_reg_0.1lam.png}
+        \caption{$0.1\lambda=0.005$}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.32\textwidth}
+        \includegraphics[width=\textwidth]{08_reg_best.png}
+        \caption{$\lambda=0.05$}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.32\textwidth}
+        \includegraphics[width=\textwidth]{09_reg_10lam.png}
+        \caption{$10\lambda=0.5$}
+    \end{subfigure}
+    \caption{Regularized deconvolution for three values of $\lambda$.}
+\end{figure}
+
+We use the squared gradient norm specified in the assignment:
+
+\[
+R(\hat f)
+=
+\sum_{x,y}
+\left[
+(\hat f(x+1,y)-\hat f(x,y))^2+
+(\hat f(x,y+1)-\hat f(x,y))^2
+\right].
+\]
+
+The objective is
+
+\[
+E(\hat f)=\|h*\hat f-g\|^2+\lambda R(\hat f).
+\]
+
+For the finite differences,
+
+\[
+|D_x(u,v)|^2=4\sin^2(\pi u),
+\qquad
+|D_y(u,v)|^2=4\sin^2(\pi v).
+\]
+
+Thus,
+
+\[
+P(u,v)
+=
+4\sin^2(\pi u)+4\sin^2(\pi v).
+\]
+
+In the Fourier domain,
+
+\[
+E(\hat F)
+=
+\sum_{u,v}
+\left[
+|H\hat F-G|^2+
+\lambda P|\hat F|^2
+\right].
+\]
+
+Setting the derivative with respect to $\hat F^*$ to zero gives
+
+\[
+\boxed{
+\hat F(u,v)
+=
+\frac{H^*(u,v)G(u,v)}
+{|H(u,v)|^2+\lambda P(u,v)}
+}
+\]
+
+or equivalently,
+
+\[
+\boxed{
+\hat F(u,v)
+=
+\frac{H^*(u,v)G(u,v)}
+{|H(u,v)|^2+
+\lambda\left[
+4\sin^2(\pi u)+4\sin^2(\pi v)
+\right]}.
+}
+\]
+
+We tested a wide range of $\lambda$ values and found
+
+\[
+\boxed{\lambda_{\mathrm{best}}=0.05}
+\]
+
+to give the best qualitative result.
+
+
+
+With $\lambda=0.005$, more streaking remains due to weak regularization. At $\lambda=0.05$, the artifacts are substantially reduced while image structure is retained. For $\lambda=0.5$, stronger smoothing removes additional high-frequency detail. Hence, $\lambda=0.05$ was selected.
+
+
+
+
+
+\end{document}
